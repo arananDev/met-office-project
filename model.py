@@ -18,7 +18,7 @@ import os
 
 
 def Model_Export(model, name): 
-    pickle_out = open("model/" + name + ".pickle", "wb")
+    pickle_out = open("saved_models/" + name + ".pickle", "wb")
     pickle.dump(model, pickle_out)
     pickle_out.close()
     
@@ -199,5 +199,38 @@ class Model:
         clf_best.fit(self.X_train, self.y_train )
         self.final = clf_best
         return ranked_data
+    
+    
+def Run_Model(model,
+          C_values = np.linspace(1, 10, 10),
+          Gamma_values= np.linspace(0.0001, 0.001, 10),
+         balance_data = False, 
+         feature_reduction = False, 
+         search = "grid"): 
+    if balance_data == False: 
+        pass 
+    else: 
+        pass 
+
+    if feature_reduction == False: 
+        pass 
+    else: 
+        model.feature_reduction(method = feature_reduction )
+
+    if search == "grid": 
+        print("start model grid search")
+        model.gridsearch()
+        data = model.grid_data
+        print("done model grid search")
+
+    if search == "fine": 
+        print("start model fine search")
+        model.finesearch(C_values, Gamma_values)
+        data = model.fine_data
+        print("end model fine search")
+
+    Model_Export(model, model.name)
+    data.to_csv(str(model.id) + "_"+ search + "_" + model.name +".csv", index_label=False)
+    return data 
     
      
