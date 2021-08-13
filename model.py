@@ -14,7 +14,8 @@ from sklearn.linear_model import LogisticRegression
 #from imblearn.over_sampling import SMOTENC 
 import time
 import os
-#import matplotlib.pyplot as plt
+from sklearn import metrics
+
 
 
 def Model_Export(model, name): 
@@ -23,7 +24,7 @@ def Model_Export(model, name):
     pickle_out.close()
     
 def Model_Import(file): 
-    pickle_in = open("model/" + file, "rb")
+    pickle_in = open("saved_models/" + file, "rb")
     return pickle.load(pickle_in)
 
 def read_in_data(name):
@@ -196,8 +197,10 @@ class Model:
         ranked_data = pd.DataFrame(clf.cv_results_).sort_values(by=['rank_test_score'])
         self.fine_data = ranked_data
         clf_best = clf.best_estimator_
-        clf_best.fit(self.X_train, self.y_train )
-        self.final = clf_best
+        cw, C, gamma  = clf_best.class_weight , clf_best.C, clf_best.gamma
+        final = SVC(kernel = "rbf", gamma = gamma, C = C, class_weight = cw, probability = True)
+        final.fit(self.X_train, self.y_train )
+        self.final = final
         return ranked_data
     
     
