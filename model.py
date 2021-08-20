@@ -10,8 +10,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.svm import LinearSVC
 from sklearn.feature_selection import SelectFromModel
 from sklearn.linear_model import LogisticRegression
-#from kmodes.kprototypes import KPrototypes
-#from imblearn.over_sampling import SMOTENC 
+from imblearn.over_sampling import SMOTENC 
 import time
 import os
 from sklearn import metrics
@@ -32,7 +31,7 @@ def read_in_data(name):
     X_train, X_test, y_train, y_test, feature_index = pickle.load(Import)
     return X_train, X_test, y_train, y_test, feature_index 
 
-def metrics(true, predict):
+def pre_metrics(true, predict):
     ### Need to add the reference to Bobra 
     TN = 0.
     TP = 0.
@@ -78,11 +77,11 @@ class Model:
         if method == "F_score":
             scorer = SelectKBest(k = "all").fit(X_train, y_train)
             F_score_data = pd.DataFrame( scorer.scores_)
-            F_score_data.index = feature_index
+            F_score_data.index = self.feature_index
             F_score_data.columns = ["F-score"]
             self.F_score_data = F_score_data
             if threshold == False: 
-                return "Look up F-score data to decide a threshold "
+                return "Look up F_score_data attribute in model to decide a threshold "
             else: 
                 new_feature_index = F_score_data[F_score_data["F-score"] > threshold].index
                 best_no = F_score_data[F_score_data["F-score"] > threshold].shape[0]
@@ -129,7 +128,7 @@ class Model:
             
         
 
-    def balance_data(self, N_clusters, l = 4):
+    def balance_data(self, N_clusters, l = 3, Kmodes = False):
         """
         Balance data by undersampling the negative class via K-prototype clustering and oversampling the positive class
         via SMOTE. N_clusters determines amount of datapoints for the undersampling, and categorical index is a list for 
@@ -140,7 +139,8 @@ class Model:
         
         # Seperate positive and negative classes 
         X_train = self.X_train 
-        train = np.column_stack((X_train_new,y_train))
+        y_train = self.y_train
+        train = np.column_stack((X_train,y_train))
         train_pos = train[train[:,-1] == 1]
         X_train_pos = train[train[:,-1] == 1][:,:-1].copy()
         X_train_neg = train[train[:,-1] == 0][:,:-1].copy()
@@ -168,10 +168,10 @@ class Model:
             
             
             
-    def gridsearch(self):
+    def gridsearch(self, kernel = "rbf"):
         C_values = [10**i for i in range(-2,5)]
         Gamma_values = [10**i for i in range(-4,3)]
-        parameters = {'kernel': ['rbf'], 
+        parameters = {'kernel': [kernel], 
                   'C': C_values, 
                   "gamma":Gamma_values ,
                   "class_weight": ["balanced"] }
@@ -185,8 +185,8 @@ class Model:
 
     
     
-    def finesearch(self,C_values, Gamma_values):
-        parameters = {'kernel': ['rbf'], 
+    def finesearch(self,C_values, Gamma_values, kernel = "rbf"):
+        parameters = {'kernel': [kernel], 
                   'C': C_values, 
                   "gamma":Gamma_values ,
                   "class_weight": ["balanced"] }
@@ -198,42 +198,120 @@ class Model:
         self.fine_data = ranked_data
         clf_best = clf.best_estimator_
         cw, C, gamma  = clf_best.class_weight , clf_best.C, clf_best.gamma
-        final = SVC(kernel = "rbf", gamma = gamma, C = C, class_weight = cw, probability = True)
+        final = SVC(kernel = kernel, gamma = gamma, C = C, class_weight = cw, probability = True)
         final.fit(self.X_train, self.y_train )
         self.final = final
         return ranked_data
     
     
+    def quicksearch(self, kernel = "rbf"):
+        C_values = [10**i for i in range(-2,5)]
+        Gamma_values = [10**i for i in range(-4,3)]
+        parameters = {'kernel': [kernel], 
+                  'C': C_values, 
+                  "gamma":Gamma_values ,
+                  "class_weight": ["balanced"] }
+
+        svc = SVC()
+        clf = GridSearchCV(svc, parameters,scoring = 'roc_auc' , cv = 10)
+        clf.fit(self.X_train, self.y_train )
+        clf_best = clf.best_estimator_
+        for b, param in  zip([clf_best.C, clf_best.gamma], ['C', "gamma"]):
+            parameters[param] = np.linspace(b/10,b*3,10)
+        svc = SVC()
+        clf = GridSearchCV(svc, parameters,scoring = 'roc_auc' , cv = 10)
+        clf.fit(self.X_train, self.y_train )
+        ranked_data = pd.DataFrame(clf.cv_results_).sort_values(by=['rank_test_score'])
+        self.quick_data = ranked_data
+        clf_best = clf.best_estimator_
+        cw, C, gamma  = clf_best.class_weight , clf_best.C, clf_best.gamma
+        final = SVC(kernel = kernel, gamma = gamma, C = C, class_weight = cw, probability = True)
+        final.fit(self.X_train, self.y_train )
+        self.final = final
+        return ranked_data
+        
+    
+    
 def Run_Model(model,
           C_values = np.linspace(1, 10, 10),
           Gamma_values= np.linspace(0.0001, 0.001, 10),
-         balance_data = False, 
-         feature_reduction = False, 
-         search = "grid"): 
-    if balance_data == False: 
-        pass 
-    else: 
-        pass 
+         balance_data = False,
+              N_clusters = 500,
+              l = 3,
+         feature_reduction = False,
+          threshold = False, 
+         search = "grid",
+             kernel = "rbf"): 
+    if balance_data == True: 
+        model.balance_data(N_clusters, l) 
 
     if feature_reduction == False: 
         pass 
     else: 
-        model.feature_reduction(method = feature_reduction )
+        model.feature_reduction(method = feature_reduction, threshold = threshold )
 
     if search == "grid": 
         print("start model grid search")
-        model.gridsearch()
+        model.gridsearch(kernel = kernel )
         data = model.grid_data
         print("done model grid search")
 
-    if search == "fine": 
+    elif search == "fine": 
         print("start model fine search")
-        model.finesearch(C_values, Gamma_values)
+        model.finesearch(C_values, Gamma_values,kernel = kernel )
         data = model.fine_data
         print("end model fine search")
+        
+    elif search == "quick":
+        print("start model quick search")
+        model.quicksearch(kernel = kernel )
+        data = model.quick_data
+        print("end model quick search")
+    
+    else: 
+        print("choose search variable")
 
     Model_Export(model, model.name)
     data.to_csv(str(model.id) + "_"+ search + "_" + model.name +".csv", index_label=False)
     return data 
+
+class Super_Model():
+
+
+    def __init__(self, data_name, model_name): 
+        model = Model(*read_in_data(data_name),"dummy")
+        self.name = model_name
+        model.feature_reduction("Logistic")
+        self.X_train, self.X_test, self.y_train, self.y_test, self.feature_index, = model.X_train, model.X_test, model.y_train, model.y_test, model.feature_index
+    
+        
+    def Majority_classifier(self, N_models = 10, N_clusters = 750, categorical_start = 3, kernel = "rbf"): 
+        categorical_index = [i for i in range(categorical_start, len(self.feature_index))]
+        X_train, y_train = self.X_train, self.y_train
+        X_test, y_test  = self.X_test, self.y_test 
+        train = np.column_stack((X_train,y_train))
+        train_pos = train[train[:,-1] == 1]
+        train_neg = train[train[:,-1] == 0].copy()
+        print(train_neg.shape)
+        Estimators = []
+        for i in range(N_models):
+            # Resample and balance the data
+            np.random.shuffle(train_neg)
+            train_neg_sample = train_neg[0:N_clusters]
+            train_new = np.vstack((train_pos, train_neg_sample))
+            np.random.shuffle(train_new)
+            X_new = train_new[:,:-1]
+            y_new = train_new[:,-1]
+            sm =  SMOTENC(categorical_features = categorical_index, random_state=42)
+            X_res, y_res = sm.fit_resample(X_new, y_new)
+            # Create a model
+            model_small = Model(X_res, X_test, y_res, y_test, self.feature_index, "model" + str(i))
+            model_small.quicksearch(kernel = kernel)
+            Estimators.append(model_small.final)
+            print(f"finished model {i}")
+        ## Create a majority voting model 
+        self.majority_estimators = Estimators 
+            
+
     
      
