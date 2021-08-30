@@ -10,10 +10,17 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.svm import LinearSVC
 from sklearn.feature_selection import SelectFromModel
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier 
 from imblearn.over_sampling import SMOTENC 
 import time
 import os
 from sklearn import metrics
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, roc_auc_score
+import warnings
+warnings.filterwarnings('ignore')
+import seaborn as sns
+
 
 
 
@@ -50,7 +57,7 @@ def pre_metrics(true, predict):
     return TN, FP, TP, FN
 
 def TSS(true, predict): 
-    TN, FP, TP, FN = metrics(true, predict)
+    TN, FP, TP, FN = pre_metrics(true, predict)
     return (TP/(TP+FN)) - ( FP/(FP+TN))
 
 
@@ -133,7 +140,7 @@ class Model:
         Balance data by undersampling the negative class via K-prototype clustering and oversampling the positive class
         via SMOTE. N_clusters determines amount of datapoints for the undersampling, and categorical index is a list for 
         all categorical features in the dataset 
-        
+        NOTE: This dimension reduction method doesn't work, K prototypes takes too long to converge 
         """
         categorical_index = [i for i in range(l, len(self.feature_index))]
         
@@ -168,10 +175,10 @@ class Model:
             
             
             
-    def gridsearch(self, kernel = "rbf"):
+    def gridsearch(self, Kernel = "rbf", fit = False):
         C_values = [10**i for i in range(-2,5)]
         Gamma_values = [10**i for i in range(-4,3)]
-        parameters = {'kernel': [kernel], 
+        parameters = {'kernel': [Kernel], 
                   'C': C_values, 
                   "gamma":Gamma_values ,
                   "class_weight": ["balanced"] }
@@ -181,12 +188,19 @@ class Model:
         clf.fit(self.X_train, self.y_train )
         ranked_data = pd.DataFrame(clf.cv_results_).sort_values(by=['rank_test_score'])
         self.grid_data = ranked_data
+        if fit == True: 
+            clf_best = clf.best_estimator_
+            cw, C, gamma  = clf_best.class_weight , clf_best.C, clf_best.gamma
+            final = SVC(kernel = Kernel, gamma = gamma, C = C, class_weight = cw, probability = True)
+            final.fit(self.X_train, self.y_train )
+            self.final = final
+            
         return ranked_data 
 
     
     
-    def finesearch(self,C_values, Gamma_values, kernel = "rbf"):
-        parameters = {'kernel': [kernel], 
+    def finesearch(self,C_values, Gamma_values, Kernel = "rbf"):
+        parameters = {'kernel': [Kernel], 
                   'C': C_values, 
                   "gamma":Gamma_values ,
                   "class_weight": ["balanced"] }
@@ -198,52 +212,21 @@ class Model:
         self.fine_data = ranked_data
         clf_best = clf.best_estimator_
         cw, C, gamma  = clf_best.class_weight , clf_best.C, clf_best.gamma
-        final = SVC(kernel = kernel, gamma = gamma, C = C, class_weight = cw, probability = True)
+        final = SVC(kernel = Kernel, gamma = gamma, C = C, class_weight = cw, probability = True)
         final.fit(self.X_train, self.y_train )
         self.final = final
         return ranked_data
-    
-    
-    def quicksearch(self, kernel = "rbf"):
-        C_values = [10**i for i in range(-2,5)]
-        Gamma_values = [10**i for i in range(-4,3)]
-        parameters = {'kernel': [kernel], 
-                  'C': C_values, 
-                  "gamma":Gamma_values ,
-                  "class_weight": ["balanced"] }
 
-        svc = SVC()
-        clf = GridSearchCV(svc, parameters,scoring = 'roc_auc' , cv = 10)
-        clf.fit(self.X_train, self.y_train )
-        clf_best = clf.best_estimator_
-        for b, param in  zip([clf_best.C, clf_best.gamma], ['C', "gamma"]):
-            parameters[param] = np.linspace(b/10,b*3,10)
-        svc = SVC()
-        clf = GridSearchCV(svc, parameters,scoring = 'roc_auc' , cv = 10)
-        clf.fit(self.X_train, self.y_train )
-        ranked_data = pd.DataFrame(clf.cv_results_).sort_values(by=['rank_test_score'])
-        self.quick_data = ranked_data
-        clf_best = clf.best_estimator_
-        cw, C, gamma  = clf_best.class_weight , clf_best.C, clf_best.gamma
-        final = SVC(kernel = kernel, gamma = gamma, C = C, class_weight = cw, probability = True)
-        final.fit(self.X_train, self.y_train )
-        self.final = final
-        return ranked_data
         
     
     
 def Run_Model(model,
           C_values = np.linspace(1, 10, 10),
           Gamma_values= np.linspace(0.0001, 0.001, 10),
-         balance_data = False,
-              N_clusters = 500,
-              l = 3,
          feature_reduction = False,
           threshold = False, 
          search = "grid",
              kernel = "rbf"): 
-    if balance_data == True: 
-        model.balance_data(N_clusters, l) 
 
     if feature_reduction == False: 
         pass 
@@ -252,40 +235,31 @@ def Run_Model(model,
 
     if search == "grid": 
         print("start model grid search")
-        model.gridsearch(kernel = kernel )
+        model.gridsearch(Kernel = kernel )
         data = model.grid_data
         print("done model grid search")
 
     elif search == "fine": 
         print("start model fine search")
-        model.finesearch(C_values, Gamma_values,kernel = kernel )
+        model.finesearch(C_values, Gamma_values,Kernel = kernel )
         data = model.fine_data
         print("end model fine search")
-        
-    elif search == "quick":
-        print("start model quick search")
-        model.quicksearch(kernel = kernel )
-        data = model.quick_data
-        print("end model quick search")
+
     
     else: 
-        print("choose search variable")
+        print("choose search function")
 
     Model_Export(model, model.name)
     data.to_csv(str(model.id) + "_"+ search + "_" + model.name +".csv", index_label=False)
     return data 
 
-class Super_Model():
-
-
-    def __init__(self, data_name, model_name): 
-        model = Model(*read_in_data(data_name),"dummy")
-        self.name = model_name
-        model.feature_reduction("Logistic")
-        self.X_train, self.X_test, self.y_train, self.y_test, self.feature_index, = model.X_train, model.X_test, model.y_train, model.y_test, model.feature_index
+class Majority_Model(Model): 
     
+    def __init__(self,model, name):
+        self.X_train, self.X_test, self.y_train, self.y_test, self.final, self.feature_index = model.X_train, model.X_test, model.y_train, model.y_test, model.final, model.feature_index 
+        self.name = name 
         
-    def Majority_classifier(self, N_models = 10, N_clusters = 750, categorical_start = 3, kernel = "rbf"): 
+    def train(self, N_models = 20, N_clusters = 750, categorical_start = 3, Kernel_ = "rbf"): 
         categorical_index = [i for i in range(categorical_start, len(self.feature_index))]
         X_train, y_train = self.X_train, self.y_train
         X_test, y_test  = self.X_test, self.y_test 
@@ -302,16 +276,111 @@ class Super_Model():
             np.random.shuffle(train_new)
             X_new = train_new[:,:-1]
             y_new = train_new[:,-1]
-            sm =  SMOTENC(categorical_features = categorical_index, random_state=42)
+            #sm =  SMOTENC(categorical_features = categorical_index, random_state=42)
+            sm =   SMOTENC(categorical_index, random_state=42)
             X_res, y_res = sm.fit_resample(X_new, y_new)
             # Create a model
             model_small = Model(X_res, X_test, y_res, y_test, self.feature_index, "model" + str(i))
-            model_small.quicksearch(kernel = kernel)
+            model_small.gridsearch(Kernel = Kernel_, fit = True)
             Estimators.append(model_small.final)
             print(f"finished model {i}")
         ## Create a majority voting model 
-        self.majority_estimators = Estimators 
-            
-
+        self.estimators = Estimators 
+        
+    def predict(self, X):
+        # get values
+        Y = np.zeros([X.shape[0], len(self.estimators)], dtype=int)
+        for i, clf in enumerate(self.estimators):
+            Y[:, i] = clf.predict(X)
+        # apply voting
+        print(Y)
+        predict_prob = np.zeros((X.shape[0], 2))
+        y = np.zeros(X.shape[0])
+        for i in range(X.shape[0]):
+            y[i] = np.argmax(np.bincount(Y[i,:]))
+            predict_prob[i][1] = np.sum(Y[i])/len(Y[0])
+            predict_prob[i][0] = 1 - predict_prob[i][1]
+        return y, predict_prob
     
-     
+class SVM_KM(Model): 
+    def __init__(self,model, name):
+        self.X_train, self.X_test, self.y_train, self.y_test, self.svc, self.feature_index = model.X_train, model.X_test, model.y_train, model.y_test, model.final, model.feature_index 
+        self.name = name
+            
+    def train(self,ub, lb, n_neighbours_ = 1): 
+        knn = KNeighborsClassifier(n_neighbors = n_neighbours_)
+        knn.fit(self.X_train, self.y_train)
+        self.knn = knn 
+        self.ub = ub
+        self.lb = lb
+        
+    def predict(self ,X_test ): 
+        ub = self.ub
+        lb = self.lb
+        svc = self.svc
+        knn = self.knn
+        y_pred = np.zeros(X_test.shape[0])
+        distances = svc.decision_function(X_test)
+        svc_probabs = svc.predict_proba(X_test)
+        svc_predictions = svc.predict(X_test)
+        knn_predictions = knn.predict(X_test)
+        knn_probabs = knn.predict_proba(X_test)
+        predict_prob = np.zeros((X_test.shape[0], 2))
+        for i in range(X_test.shape[0]): 
+            if lb <= distances[i] <= ub: 
+                y_pred[i] = knn_predictions[i]
+                predict_prob[i] = svc_probabs[i]
+            else: 
+                y_pred[i] = svc_predictions[i]
+                predict_prob[i] = knn_probabs[i]
+        return y_pred, predict_prob
+
+
+def plot_ROC(model_names, plot_names, data_names, test = True):
+    result_table = pd.DataFrame(columns=['classifiers', 'fpr','tpr','auc'])
+
+
+    for m,p,d in zip(model_names, plot_names, data_names):
+        X_train, X_test, y_train, y_test, feature_index = read_in_data(d)
+        X_train = pd.DataFrame(X_train, columns = feature_index)
+        X_test = pd.DataFrame(X_test, columns = feature_index)
+        model = Model_Import(m + ".pickle") 
+        X_train_new = X_train[model.feature_index].copy()
+        X_test_new = X_test[model.feature_index].copy()
+        if test == False:
+            y_pred, y_prob = model.predict(X_train_new)
+            yproba = y_prob[:,1]
+            fpr, tpr, _ = roc_curve(y_train,  yproba)
+            auc = roc_auc_score(y_train, yproba)
+        else: 
+            y_pred, y_prob = model.predict(X_test_new)
+            yproba = y_prob[:,1]
+            fpr, tpr, _ = roc_curve(y_test,  yproba)
+            auc = roc_auc_score(y_test, yproba)
+
+        result_table = result_table.append({'classifiers':p,
+                                    'fpr':fpr, 
+                                    'tpr':tpr, 
+                                    'auc':auc}, ignore_index=True)
+
+    result_table.set_index('classifiers', inplace=True)
+
+    fig = plt.figure(figsize=(10,10))
+
+    for i in result_table.index:
+        plt.plot(result_table.loc[i]['fpr'], 
+                 result_table.loc[i]['tpr'], 
+                 label="{}, AUC={:.3f}".format(i, result_table.loc[i]['auc']))
+
+    plt.plot([0,1], [0,1], color='orange', linestyle='--')
+
+    plt.xticks(np.arange(0.0, 1.1, step=0.1))
+    plt.xlabel("False Positive Rate", fontsize=15)
+
+    plt.yticks(np.arange(0.0, 1.1, step=0.1))
+    plt.ylabel("True Positive Rate", fontsize=15)
+
+    plt.title('ROC Curve Analysis', fontweight='bold', fontsize=15)
+    plt.legend(prop={'size':13}, loc='lower right')
+
+    plt.show()   
